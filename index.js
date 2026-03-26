@@ -15,7 +15,6 @@ app.get('/', async (req, res) => {
     try {
         const today = new Date().toLocaleDateString();
 
-        // 1. Check Memory
         if (fs.existsSync(CACHE_FILE)) {
             const cachedData = JSON.parse(fs.readFileSync(CACHE_FILE, 'utf8'));
             if (cachedData.date === today) {
@@ -23,22 +22,25 @@ app.get('/', async (req, res) => {
             }
         }
 
-        // 2. Fetch Market Data
         const stockUrl = `https://www.alphavantage.co/query?function=TOP_GAINERS_LOSERS&apikey=${process.env.ALPHA_VANTAGE_KEY}`;
         const stockResponse = await axios.get(stockUrl);
         const topGainers = stockResponse.data.top_gainers || [];
-        
-        let stockSummary = "NVDA, AAPL, TSLA, MSFT, AMD";
-        if (topGainers.length > 0) {
-            stockSummary = topGainers.slice(0, 10).map(s => `${s.ticker} (${s.change_percentage})`).join(", ");
-        }
+        const stockSummary = topGainers.slice(0, 10).map(s => `${s.ticker}: ${s.change_percentage}`).join(", ");
 
-        // 3. Ask AI (With strict formatting instructions)
         const chatCompletion = await groq.chat.completions.create({
             messages: [
                 { 
                     role: "system", 
-                    content: "You are Quantara. For each of the 5 stocks, output EXACTLY this: <div class='card'><div class='card-row'><h2>TICKER</h2><span class='badge RISK'>RISK</span></div><p>THESIS</p></div>. Use 'Low', 'Mid', or 'High' for risk." 
+                    content: `You are Quantara Core. For the top 5 stocks, return EXACTLY this HTML for each: 
+                    <div class="bento-card">
+                        <div class="card-top">
+                            <h2 class="ticker">TICKER</h2>
+                            <span class="pct">CHANGE_PERCENTAGE</span>
+                        </div>
+                        <div class="visual-bar"></div>
+                        <p class="thesis">1-SENTENCE_THESIS</p>
+                        <div class="tag RISK_LEVEL">RISK_LEVEL</div>
+                    </div>` 
                 },
                 { role: "user", content: `Analyze: ${stockSummary}. Pick top 5.` }
             ],
@@ -46,13 +48,11 @@ app.get('/', async (req, res) => {
         });
 
         const aiHtml = chatCompletion.choices[0]?.message?.content || "";
-
-        // 4. Save and Render
         fs.writeFileSync(CACHE_FILE, JSON.stringify({ date: today, html: aiHtml }));
         res.send(renderPage(aiHtml));
 
     } catch (err) {
-        res.status(500).send(renderPage(`<p>Quantara is recalibrating. Refresh in 30s. Error: ${err.message}</p>`));
+        res.status(500).send(renderPage(`<div class="error">System Sync Required. Refreshing...</div>`));
     }
 });
 
@@ -61,43 +61,42 @@ function renderPage(content) {
     <!DOCTYPE html>
     <html>
     <head>
-        <title>Quantara | AI Terminal</title>
+        <title>Quantara | Terminal</title>
         <meta name="viewport" content="width=device-width, initial-scale=1">
+        <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@700&family=Inter:wght@400;700&display=swap" rel="stylesheet">
         <style>
-            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;800&display=swap');
-            :root { --bg: #020617; --card: #0f172a; --accent: #38bdf8; --border: #1e293b; }
-            body { background: var(--bg); color: #f8fafc; font-family: 'Inter', sans-serif; margin: 0; padding: 40px 20px; display: flex; justify-content: center; }
-            .container { max-width: 650px; width: 100%; }
-            header { text-align: center; margin-bottom: 40px; }
-            h1 { font-size: 3rem; font-weight: 800; letter-spacing: -2px; margin: 0; background: linear-gradient(to right, #38bdf8, #818cf8); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-            .date { color: #64748b; font-size: 0.8rem; letter-spacing: 2px; text-transform: uppercase; margin-top: 8px; }
-            
-            .card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 20px; margin-bottom: 16px; transition: 0.3s; }
-            .card:hover { border-color: var(--accent); transform: translateY(-2px); }
-            .card-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
-            h2 { margin: 0; color: var(--accent); font-size: 1.4rem; }
-            p { margin: 0; color: #94a3b8; line-height: 1.5; font-size: 1rem; }
-            
-            .badge { font-size: 0.65rem; padding: 4px 10px; border-radius: 99px; font-weight: 700; text-transform: uppercase; border: 1px solid currentColor; }
-            .Low { color: #34d399; } .Mid { color: #fbbf24; } .High { color: #f87171; }
-            
-            footer { margin-top: 40px; text-align: center; font-size: 0.7rem; color: #334155; line-height: 1.8; }
+            :root { --bg: #050505; --card: rgba(17, 25, 40, 0.75); --accent: #00d2ff; }
+            body { 
+                background: var(--bg); color: #e2e8f0; font-family: 'Inter', sans-serif; 
+                margin: 0; padding: 60px 20px; display: flex; flex-direction: column; align-items: center; 
+                background-image: radial-gradient(circle at 50% -20%, #1e293b 0%, #050505 80%);
+            }
+            .container { max-width: 900px; width: 100%; }
+            header { border-left: 4px solid var(--accent); padding-left: 20px; margin-bottom: 50px; }
+            h1 { font-family: 'Space Grotesk', sans-serif; font-size: 3.5rem; margin: 0; letter-spacing: -3px; text-transform: uppercase; }
+            .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; }
+            .bento-card { 
+                background: var(--card); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.1); 
+                border-radius: 24px; padding: 30px; transition: 0.4s; 
+            }
+            .bento-card:hover { transform: translateY(-5px); border-color: var(--accent); box-shadow: 0 0 30px rgba(0, 210, 255, 0.2); }
+            .ticker { font-family: 'Space Grotesk', sans-serif; font-size: 1.8rem; margin: 0; }
+            .pct { color: #10b981; font-weight: 700; }
+            .visual-bar { height: 2px; background: var(--accent); margin: 15px 0; opacity: 0.3; }
+            .thesis { color: #94a3b8; font-size: 0.95rem; line-height: 1.6; }
+            .tag { display: inline-block; margin-top: 20px; font-size: 0.6rem; padding: 4px 10px; border-radius: 100px; border: 1px solid currentColor; text-transform: uppercase; font-weight: 800; }
+            .Low { color: #10b981; } .Mid { color: #f59e0b; } .High { color: #ef4444; }
+            footer { margin-top: 60px; font-size: 0.7rem; color: #475569; text-align: center; }
         </style>
     </head>
     <body>
         <div class="container">
-            <header>
-                <h1>QUANTARA</h1>
-                <div class="date">AI Terminal • ${new Date().toLocaleDateString()}</div>
-            </header>
-            ${content}
-            <footer>
-                QUANTARA IS AN AI RESEARCH EXPERIMENT. NOT FINANCIAL ADVICE.<br>
-                POWERED BY LLAMA 3.3 & ALPHA VANTAGE.
-            </footer>
+            <header><h1>QUANTARA</h1><div style="letter-spacing:3px; font-size:0.7rem; color:#64748b;">V2.0 // TERMINAL ACTIVE</div></header>
+            <div class="grid">${content}</div>
+            <footer>QUANTARA CORE // NOT FINANCIAL ADVICE</footer>
         </div>
     </body>
     </html>`;
 }
 
-app.listen(port, () => { console.log(`Live at port ${port}`); });
+app.listen(port, () => { console.log(`Terminal Online`); });
