@@ -7,6 +7,8 @@ const Groq = require("groq-sdk");
 const app = express();
 const port = process.env.PORT || 3000;
 
+app.use(express.json());
+
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 const CACHE_FILE = './daily_picks.json';
 const MODEL_NAME = "llama-3.3-70b-versatile";
@@ -60,6 +62,76 @@ app.get('/', async (req, res) => {
 
     } catch (err) {
         res.send(renderPage(`<div class="error">Quantara Core: Updating Live Feeds...</div>`, []));
+    }
+});
+
+// NEW: Ticker search endpoint
+app.post('/search', async (req, res) => {
+    const { ticker } = req.body;
+
+    if (!ticker || !/^[A-Za-z]{1,5}$/.test(ticker.trim())) {
+        return res.json({ error: 'Invalid ticker symbol.' });
+    }
+
+    const symbol = ticker.trim().toUpperCase();
+
+    try {
+        // Fetch quote from Alpha Vantage
+        const quoteUrl = `https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${symbol}&apikey=${process.env.ALPHA_VANTAGE_KEY}`;
+        const quoteResponse = await axios.get(quoteUrl);
+        const quote = quoteResponse.data['Global Quote'];
+
+        if (!quote || !quote['05. price']) {
+            return res.json({ error: `No data found for ticker: ${symbol}` });
+        }
+
+        const price = parseFloat(quote['05. price']).toFixed(2);
+        const change = parseFloat(quote['09. change']).toFixed(2);
+        const changePct = parseFloat(quote['10. change percent']).toFixed(2);
+        const isPositive = parseFloat(change) >= 0;
+        const changeDisplay = `${isPositive ? '+' : ''}${changePct}%`;
+
+        // Ask Groq for analysis
+        const chatCompletion = await groq.chat.completions.create({
+            messages: [
+                {
+                    role: "system",
+                    content: `You are Quantara Core, an institutional-grade market intelligence system. 
+                    Provide a concise, sharp analysis of the stock in 2-3 sentences. 
+                    Also provide a risk level: Low, Mid, or High.
+                    Respond ONLY in this exact JSON format, no markdown, no extra text:
+                    {"thesis":"your analysis here","risk":"Low"}`
+                },
+                {
+                    role: "user",
+                    content: `Analyze ${symbol}. Price: $${price}. Change today: ${changeDisplay}.`
+                }
+            ],
+            model: MODEL_NAME,
+        });
+
+        const raw = chatCompletion.choices[0]?.message?.content || '{}';
+        let parsed = {};
+        try {
+            parsed = JSON.parse(raw.replace(/```json|```/g, '').trim());
+        } catch {
+            parsed = { thesis: "Analysis unavailable at this time.", risk: "Mid" };
+        }
+
+        const thesis = parsed.thesis || "Analysis unavailable.";
+        const risk = ['Low', 'Mid', 'High'].includes(parsed.risk) ? parsed.risk : 'Mid';
+
+        res.json({
+            ticker: symbol,
+            price,
+            change: changeDisplay,
+            isPositive,
+            thesis,
+            risk
+        });
+
+    } catch (err) {
+        res.json({ error: 'Failed to fetch data. Please try again.' });
     }
 });
 
@@ -128,7 +200,7 @@ function renderPage(content, rawStocks) {
             }
             .hero-text p { letter-spacing: 12px; font-weight: 700; margin-top: 20px; font-size: 0.8rem; }
 
-            .btn-glow { margin-top: 50px; display: inline-block; background: transparent; color: #fff; border: 1px solid var(--cyan); padding: 18px 50px; border-radius: 4px; text-decoration: none; font-weight: 800; text-transform: uppercase; font-size: 0.75rem; letter-spacing: 3px; transition: 0.4s; position: relative; overflow: hidden; }
+            .btn-glow { margin-top: 50px; display: inline-block; background: transparent; color: #fff; border: 1px solid var(--cyan); padding: 18px 50px; border-radius: 4px; text-decoration: none; font-weight: 800; text-transform: uppercase; font-size: 0.75rem; letter-spacing: 3px; transition: 0.4s; position: relative; overflow: hidden; cursor: pointer; }
             .btn-glow:hover { background: var(--cyan); color: #000; box-shadow: 0 0 40px var(--cyan); }
 
             .container { max-width: 1200px; margin: 50px auto; padding: 0 20px; }
@@ -138,6 +210,7 @@ function renderPage(content, rawStocks) {
             
             .ticker-text { font-family: 'Space Grotesk'; font-size: 2.8rem; color: #fff; margin: 0; letter-spacing: -2px; }
             .change { color: var(--green); font-weight: 800; font-family: monospace; font-size: 1.3rem; }
+            .change.negative { color: var(--pink); }
             .glow-line { height: 1px; width: 100%; background: linear-gradient(90deg, var(--cyan), transparent); margin: 20px 0; }
             .thesis { color: #8b949e; line-height: 1.8; font-size: 1.1rem; font-weight: 300; }
             
@@ -147,7 +220,7 @@ function renderPage(content, rawStocks) {
             .chart-btn { color: #fff; font-size: 0.7rem; text-decoration: none; opacity: 0.5; transition: 0.3s; }
             .chart-btn:hover { opacity: 1; text-decoration: underline; }
 
-            /* Elite Heatmap */
+            /* Heatmap */
             .heatmap-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 15px; margin-top: 40px; }
             .map-box { 
                 height: 140px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.05);
@@ -157,6 +230,134 @@ function renderPage(content, rawStocks) {
             .map-box:hover { transform: scale(1.03); border-color: #fff; z-index: 5; box-shadow: 0 10px 30px rgba(0,0,0,0.8); }
             .map-ticker { font-family: 'Space Grotesk'; font-weight: 700; font-size: 1.6rem; color: #fff; }
             .map-pct { font-size: 0.85rem; font-weight: bold; margin-top: 8px; color: var(--green); }
+
+            /* ── SEARCH FEATURE ── */
+            .search-section {
+                margin-bottom: 60px;
+                background: var(--glass);
+                border: 1px solid var(--border);
+                border-radius: 24px;
+                padding: 40px;
+                backdrop-filter: blur(20px);
+            }
+            .search-label {
+                font-family: 'Space Grotesk';
+                font-size: 0.7rem;
+                letter-spacing: 3px;
+                color: var(--cyan);
+                text-transform: uppercase;
+                margin-bottom: 20px;
+                display: block;
+            }
+            .search-row {
+                display: flex;
+                gap: 12px;
+                align-items: center;
+            }
+            .search-input {
+                flex: 1;
+                background: rgba(0,0,0,0.4);
+                border: 1px solid var(--border);
+                border-radius: 8px;
+                padding: 16px 24px;
+                color: #fff;
+                font-family: 'Space Grotesk';
+                font-size: 1.4rem;
+                font-weight: 700;
+                letter-spacing: 4px;
+                text-transform: uppercase;
+                outline: none;
+                transition: 0.3s;
+                max-width: 280px;
+            }
+            .search-input::placeholder { color: #30363d; letter-spacing: 3px; font-size: 1rem; }
+            .search-input:focus { border-color: var(--cyan); box-shadow: 0 0 20px rgba(0,210,255,0.15); }
+            .search-btn {
+                background: transparent;
+                color: #fff;
+                border: 1px solid var(--cyan);
+                padding: 16px 36px;
+                border-radius: 8px;
+                font-family: 'Space Grotesk';
+                font-size: 0.75rem;
+                font-weight: 700;
+                letter-spacing: 3px;
+                text-transform: uppercase;
+                cursor: pointer;
+                transition: 0.3s;
+                white-space: nowrap;
+            }
+            .search-btn:hover:not(:disabled) { background: var(--cyan); color: #000; box-shadow: 0 0 30px rgba(0,210,255,0.4); }
+            .search-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+            .search-result {
+                margin-top: 30px;
+                display: none;
+            }
+            .search-result.visible { display: block; }
+
+            .result-card {
+                background: rgba(0,0,0,0.3);
+                border: 1px solid var(--cyan);
+                border-radius: 16px;
+                padding: 35px;
+                position: relative;
+                animation: fadeSlideIn 0.4s ease;
+            }
+            @keyframes fadeSlideIn {
+                from { opacity: 0; transform: translateY(12px); }
+                to { opacity: 1; transform: translateY(0); }
+            }
+            .result-card .card-head {
+                display: flex;
+                justify-content: space-between;
+                align-items: flex-start;
+                margin-bottom: 0;
+            }
+            .result-card h2 {
+                font-family: 'Space Grotesk';
+                font-size: 2.8rem;
+                color: #fff;
+                margin: 0;
+                letter-spacing: -2px;
+            }
+            .result-meta {
+                text-align: right;
+            }
+            .result-price {
+                font-family: monospace;
+                font-size: 1.4rem;
+                color: #fff;
+                font-weight: bold;
+            }
+            .search-error {
+                color: var(--pink);
+                font-family: monospace;
+                font-size: 0.85rem;
+                letter-spacing: 1px;
+                padding: 16px 0 0;
+            }
+
+            .scanning {
+                display: none;
+                align-items: center;
+                gap: 12px;
+                color: var(--cyan);
+                font-family: monospace;
+                font-size: 0.75rem;
+                letter-spacing: 2px;
+                margin-top: 20px;
+            }
+            .scanning.active { display: flex; }
+            .scan-dot {
+                width: 6px; height: 6px; border-radius: 50%;
+                background: var(--cyan);
+                animation: pulse 1s ease-in-out infinite;
+            }
+            .scan-dot:nth-child(2) { animation-delay: 0.2s; }
+            .scan-dot:nth-child(3) { animation-delay: 0.4s; }
+            @keyframes pulse { 0%,100% { opacity: 0.2; transform: scale(0.8); } 50% { opacity: 1; transform: scale(1.2); } }
+            /* ── END SEARCH FEATURE ── */
 
             footer { text-align: center; padding: 120px 40px; color: #30363d; font-size: 0.75rem; border-top: 1px solid var(--border); letter-spacing: 2px; }
         </style>
@@ -219,6 +420,32 @@ function renderPage(content, rawStocks) {
 
         <div id="terminal" class="page">
             <div class="container">
+
+                <!-- ── SEARCH FEATURE ── -->
+                <div class="search-section">
+                    <span class="search-label">// Ticker Intelligence Search</span>
+                    <div class="search-row">
+                        <input
+                            class="search-input"
+                            id="tickerInput"
+                            type="text"
+                            placeholder="e.g. AAPL"
+                            maxlength="5"
+                            autocomplete="off"
+                            spellcheck="false"
+                        />
+                        <button class="search-btn" id="searchBtn" onclick="searchTicker()">Run Analysis</button>
+                    </div>
+                    <div class="scanning" id="scanningIndicator">
+                        <div class="scan-dot"></div>
+                        <div class="scan-dot"></div>
+                        <div class="scan-dot"></div>
+                        <span>SCANNING MARKETS...</span>
+                    </div>
+                    <div class="search-result" id="searchResult"></div>
+                </div>
+                <!-- ── END SEARCH FEATURE ── -->
+
                 <h2 style="font-family:'Space Grotesk'; font-size:3rem; margin-bottom:40px; letter-spacing:-2px;">CORE_ANALYSIS</h2>
                 <div class="bento-grid">${content}</div>
             </div>
@@ -247,6 +474,81 @@ function renderPage(content, rawStocks) {
                 idx = (idx + 1) % 4;
                 engine.style.transform = 'translateX(-' + (idx * 100) + '%)';
             }, 7000);
+
+            // ── SEARCH FEATURE ──
+            const tickerInput = document.getElementById('tickerInput');
+            const searchBtn = document.getElementById('searchBtn');
+            const scanningIndicator = document.getElementById('scanningIndicator');
+            const searchResult = document.getElementById('searchResult');
+
+            // Allow pressing Enter to search
+            tickerInput.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') searchTicker();
+            });
+
+            async function searchTicker() {
+                const raw = tickerInput.value.trim().toUpperCase();
+                if (!raw || !/^[A-Z]{1,5}$/.test(raw)) {
+                    showSearchError('Enter a valid ticker symbol (1–5 letters).');
+                    return;
+                }
+
+                // Loading state
+                searchBtn.disabled = true;
+                scanningIndicator.classList.add('active');
+                searchResult.classList.remove('visible');
+                searchResult.innerHTML = '';
+
+                try {
+                    const response = await fetch('/search', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ ticker: raw })
+                    });
+                    const data = await response.json();
+
+                    if (data.error) {
+                        showSearchError(data.error);
+                        return;
+                    }
+
+                    const changeClass = data.isPositive ? '' : 'negative';
+                    const riskClass = data.risk;
+
+                    searchResult.innerHTML = \`
+                        <div class="result-card">
+                            <div class="card-head">
+                                <h2>\${data.ticker}</h2>
+                                <div class="result-meta">
+                                    <div class="result-price">$\${data.price}</div>
+                                    <div class="change \${changeClass}" style="font-size:1rem; margin-top:4px;">\${data.change}</div>
+                                </div>
+                            </div>
+                            <div class="glow-line"></div>
+                            <p class="thesis">\${data.thesis}</p>
+                            <div class="card-footer">
+                                <div class="status \${riskClass}">\${riskClass}</div>
+                                <a href="https://www.tradingview.com/symbols/\${data.ticker}/" target="_blank" class="chart-btn">Analysis</a>
+                            </div>
+                        </div>
+                    \`;
+                    searchResult.classList.add('visible');
+
+                } catch (err) {
+                    showSearchError('Network error. Please try again.');
+                } finally {
+                    searchBtn.disabled = false;
+                    scanningIndicator.classList.remove('active');
+                }
+            }
+
+            function showSearchError(msg) {
+                searchResult.innerHTML = \`<div class="search-error">// ERROR: \${msg}</div>\`;
+                searchResult.classList.add('visible');
+                searchBtn.disabled = false;
+                scanningIndicator.classList.remove('active');
+            }
+            // ── END SEARCH FEATURE ──
         </script>
     </body>
     </html>`;
