@@ -354,7 +354,7 @@ function renderPage(content, rawStocks, updatedAt) {
             <div class="hero-slider">
                 <div class="slides" id="slide-engine">
                     <div class="slide">
-                        <img src="https://images.unsplash.com/photo-1611974714658-058e11e3b123?auto=format&fit=crop&q=80&w=1600">
+                        <img src="https://images.unsplash.com/photo-1611974714658-058e11e3b123?auto=format&fit=crop&q=80&w=800">
                         <div class="hero-text">
                             <p style="color:var(--cyan)">SYSTEM v11.0 ACTIVE</p>
                             <h2>QUANTARA CORE</h2>
@@ -362,7 +362,7 @@ function renderPage(content, rawStocks, updatedAt) {
                         </div>
                     </div>
                     <div class="slide">
-                        <img src="https://images.unsplash.com/photo-1590283603385-17ffb3a7f29f?auto=format&fit=crop&q=80&w=1600">
+                        <img src="https://images.unsplash.com/photo-1590283603385-17ffb3a7f29f?auto=format&fit=crop&q=80&w=800">
                         <div class="hero-text">
                             <p style="color:var(--green)">REAL-TIME MARKET FEED</p>
                             <h2>ALGORITHMIC EDGE</h2>
@@ -370,7 +370,7 @@ function renderPage(content, rawStocks, updatedAt) {
                         </div>
                     </div>
                     <div class="slide">
-                        <img src="https://images.unsplash.com/photo-1551288049-bebda4e38f71?auto=format&fit=crop&q=80&w=1600">
+                        <img src="https://images.unsplash.com/photo-1551288049-bebda4e38f71?auto=format&fit=crop&q=80&w=800">
                         <div class="hero-text">
                             <p style="color:var(--pink)">NEURAL ANALYSIS</p>
                             <h2>HEDGE FUND DATA</h2>
@@ -378,7 +378,7 @@ function renderPage(content, rawStocks, updatedAt) {
                         </div>
                     </div>
                     <div class="slide">
-                        <img src="https://images.unsplash.com/photo-1639754390580-2e7437267698?auto=format&fit=crop&q=80&w=1600">
+                        <img src="https://images.unsplash.com/photo-1639754390580-2e7437267698?auto=format&fit=crop&q=80&w=800">
                         <div class="hero-text">
                             <p style="color:#fff">PREDICTIVE MODELING</p>
                             <h2>QUANTUM POWER</h2>
