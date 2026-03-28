@@ -81,15 +81,18 @@ app.post('/search', async (req, res) => {
         const quoteResponse = await axios.get(quoteUrl);
         const quote = quoteResponse.data['Global Quote'];
 
-        if (!quote || !quote['05. price']) {
-            return res.json({ error: `No data found for ticker: ${symbol}` });
-        }
+        // Graceful fallback if Alpha Vantage is rate-limited or returns no data
+        let price = null;
+        let isPositive = true;
+        let changeDisplay = null;
 
-        const price = parseFloat(quote['05. price']).toFixed(2);
-        const change = parseFloat(quote['09. change']).toFixed(2);
-        const changePct = parseFloat(quote['10. change percent']).toFixed(2);
-        const isPositive = parseFloat(change) >= 0;
-        const changeDisplay = `${isPositive ? '+' : ''}${changePct}%`;
+        if (quote && quote['05. price']) {
+            price = parseFloat(quote['05. price']).toFixed(2);
+            const changeRaw = parseFloat(quote['09. change']);
+            const changePct = parseFloat(quote['10. change percent']).toFixed(2);
+            isPositive = changeRaw >= 0;
+            changeDisplay = `${isPositive ? '+' : ''}${changePct}%`;
+        }
 
         // Ask Groq for analysis
         const chatCompletion = await groq.chat.completions.create({
@@ -104,7 +107,9 @@ app.post('/search', async (req, res) => {
                 },
                 {
                     role: "user",
-                    content: `Analyze ${symbol}. Price: $${price}. Change today: ${changeDisplay}.`
+                    content: price
+                        ? `Analyze ${symbol}. Price: $${price}. Change today: ${changeDisplay}.`
+                        : `Provide a general institutional-grade analysis of ${symbol} as a stock.`
                 }
             ],
             model: MODEL_NAME,
@@ -123,8 +128,8 @@ app.post('/search', async (req, res) => {
 
         res.json({
             ticker: symbol,
-            price,
-            change: changeDisplay,
+            price: price || 'N/A',
+            change: changeDisplay || 'N/A',
             isPositive,
             thesis,
             risk
