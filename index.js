@@ -36,7 +36,20 @@ app.get('/', async (req, res) => {
                 { ticker: "PLTR", change_percentage: "3.8%" },
                 { ticker: "MU", change_percentage: "7.1%" },
                 { ticker: "AMD", change_percentage: "2.9%" },
-                { ticker: "TSLA", change_percentage: "5.4%" }
+                { ticker: "TSLA", change_percentage: "5.4%" },
+                { ticker: "SMCI", change_percentage: "6.1%" },
+                { ticker: "ARM",  change_percentage: "3.3%" },
+                { ticker: "MSTR", change_percentage: "8.7%" },
+                { ticker: "COIN", change_percentage: "5.9%" },
+                { ticker: "INTC", change_percentage: "2.1%" },
+                { ticker: "AAPL", change_percentage: "1.8%" },
+                { ticker: "META", change_percentage: "2.4%" },
+                { ticker: "AMZN", change_percentage: "1.6%" },
+                { ticker: "MSFT", change_percentage: "1.2%" },
+                { ticker: "GOOGL",change_percentage: "1.9%" },
+                { ticker: "NFLX", change_percentage: "3.1%" },
+                { ticker: "UBER", change_percentage: "2.7%" },
+                { ticker: "SHOP", change_percentage: "4.5%" }
             ];
         }
 
