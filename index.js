@@ -71,7 +71,6 @@ app.get('/', async (req, res) => {
 
         const stockSummary = filteredStocks.slice(0, 10).map(s => `${s.ticker} (+${s.change_percentage})`).join(", ");
 
-        // Market Pulse + analysis in one Groq call
         const chatCompletion = await groq.chat.completions.create({
             messages: [
                 { 
@@ -89,9 +88,8 @@ app.get('/', async (req, res) => {
 
         const fullResponse = chatCompletion.choices[0]?.message?.content || "";
 
-        // Split cards HTML from pulse JSON
         const pulseMatch = fullResponse.match(/PULSE_JSON:\s*(\{[\s\S]*?\})/);
-        const aiHtml = fullResponse.replace(/PULSE_JSON:[\s\S]*/, '').trim();
+        const aiHtml = fullResponse.replace(/PULSE_JSON:[\s\S]*/, '').replace(/\{[\s\S]*"score"[\s\S]*\}/, '').trim();
         let pulse = { score: 50, label: "NEUTRAL", summary: "Market data unavailable." };
         if (pulseMatch) {
             try { pulse = JSON.parse(pulseMatch[1]); } catch {}
@@ -108,7 +106,6 @@ app.get('/', async (req, res) => {
     }
 });
 
-// Ticker search endpoint
 app.post('/search', async (req, res) => {
     const { ticker } = req.body;
 
@@ -184,16 +181,23 @@ function renderPage(content, rawStocks, updatedAt, losers, pulse) {
     losers = losers || [];
     pulse = pulse || { score: 50, label: "NEUTRAL", summary: "" };
 
-    const tickerHtml = rawStocks.slice(0,10).map(s => `
+    // Ticker bar: gainers in green, losers in pink
+    const gainersTickerHtml = rawStocks.slice(0, 10).map(s => `
         <span class="ticker-item"><span class="t-sym">${s.ticker}</span> <span class="t-pct">+${s.change_percentage}</span></span>
     `).join(' • ');
+    const losersTickerHtml = losers.slice(0, 5).map(s => `
+        <span class="ticker-item"><span class="t-sym">${s.ticker}</span> <span class="t-pct t-pct-loss">${s.change_percentage}</span></span>
+    `).join(' • ');
+    const tickerHtml = gainersTickerHtml + ' • ' + losersTickerHtml;
 
+    // Heatmap gainers with price placeholder (price shown as % since we don't have individual prices here)
     const heatmapGainers = rawStocks.map(s => {
         const val = parseFloat(s.change_percentage);
         return `
             <div class="map-box" onclick="heatmapSearch('${s.ticker}')" style="background: linear-gradient(145deg, rgba(16,185,129,${val/20+0.1}), rgba(6,78,59,0.4)); border-color: rgba(16,185,129,${val/15})">
                 <span class="map-ticker">${s.ticker}</span>
                 <span class="map-pct">+${s.change_percentage}</span>
+                <span class="map-sub">CLICK TO ANALYZE</span>
             </div>`;
     }).join('');
 
@@ -203,6 +207,7 @@ function renderPage(content, rawStocks, updatedAt, losers, pulse) {
             <div class="map-box loser" onclick="heatmapSearch('${s.ticker}')" style="background: linear-gradient(145deg, rgba(255,0,127,${val/20+0.1}), rgba(78,6,30,0.4)); border-color: rgba(255,0,127,${val/15})">
                 <span class="map-ticker">${s.ticker}</span>
                 <span class="map-pct loser-pct">${s.change_percentage}</span>
+                <span class="map-sub">CLICK TO ANALYZE</span>
             </div>`;
     }).join('');
 
@@ -210,7 +215,6 @@ function renderPage(content, rawStocks, updatedAt, losers, pulse) {
         ? `<p class="updated-at">// ANALYSIS UPDATED: ${updatedAt}</p>`
         : '';
 
-    // Market Pulse gauge
     const score = Math.max(0, Math.min(100, pulse.score));
     const pulseColor = score < 25 ? '#ff007f' : score < 40 ? '#f97316' : score < 60 ? '#f59e0b' : score < 75 ? '#00d2ff' : '#00ff9d';
     const rotation = -90 + (score / 100) * 180;
@@ -233,10 +237,11 @@ function renderPage(content, rawStocks, updatedAt, losers, pulse) {
 
             /* ── TICKER BAR ── */
             .top-ticker { position: fixed; top: 0; width: 100%; height: 35px; background: rgba(0,0,0,0.8); backdrop-filter: blur(10px); border-bottom: 1px solid var(--border); z-index: 1001; overflow: hidden; display: flex; align-items: center; }
-            .ticker-move { display: flex; white-space: nowrap; animation: tickerScroll 35s linear infinite; }
+            .ticker-move { display: flex; white-space: nowrap; animation: tickerScroll 45s linear infinite; }
             .ticker-item { padding: 0 30px; font-family: monospace; font-size: 0.7rem; letter-spacing: 1px; }
             .t-sym { color: #fff; font-weight: bold; }
             .t-pct { color: var(--green); text-shadow: 0 0 10px rgba(0,255,157,0.3); }
+            .t-pct-loss { color: var(--pink); text-shadow: 0 0 10px rgba(255,0,127,0.3); }
             @keyframes tickerScroll { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } }
 
             /* ── NAV ── */
@@ -263,8 +268,6 @@ function renderPage(content, rawStocks, updatedAt, losers, pulse) {
             .hero-text p { letter-spacing: 8px; font-weight: 700; margin-top: 20px; font-size: 0.75rem; }
             .btn-glow { margin-top: 50px; display: inline-block; background: transparent; color: #fff; border: 1px solid var(--cyan); padding: 18px 50px; border-radius: 4px; text-decoration: none; font-weight: 800; text-transform: uppercase; font-size: 0.75rem; letter-spacing: 3px; transition: 0.4s; cursor: pointer; }
             .btn-glow:hover { background: var(--cyan); color: #000; box-shadow: 0 0 40px var(--cyan); }
-
-            /* ── ANIMATED PARTICLE CANVAS ── */
             .particle-canvas { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
 
             /* ── INIT OVERLAY ── */
@@ -315,8 +318,10 @@ function renderPage(content, rawStocks, updatedAt, losers, pulse) {
             .map-box { height: 140px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.05); display: flex; flex-direction: column; align-items: center; justify-content: center; position: relative; overflow: hidden; transition: 0.3s; cursor: pointer; }
             .map-box:hover { transform: scale(1.03); border-color: #fff; z-index: 5; box-shadow: 0 10px 30px rgba(0,0,0,0.8); }
             .map-ticker { font-family: 'Space Grotesk'; font-weight: 700; font-size: 1.6rem; color: #fff; }
-            .map-pct { font-size: 0.85rem; font-weight: bold; margin-top: 8px; color: var(--green); }
+            .map-pct { font-size: 0.85rem; font-weight: bold; margin-top: 6px; color: var(--green); }
             .loser-pct { color: var(--pink); }
+            .map-sub { font-size: 0.55rem; font-family: monospace; letter-spacing: 1px; color: rgba(255,255,255,0.2); margin-top: 8px; opacity: 0; transition: 0.3s; }
+            .map-box:hover .map-sub { opacity: 1; }
 
             /* ── SEARCH ── */
             .search-section { margin-bottom: 60px; background: var(--glass); border: 1px solid var(--border); border-radius: 24px; padding: 40px; backdrop-filter: blur(20px); }
@@ -329,6 +334,13 @@ function renderPage(content, rawStocks, updatedAt, losers, pulse) {
             .search-btn:hover:not(:disabled) { background: var(--cyan); color: #000; box-shadow: 0 0 30px rgba(0,210,255,0.4); }
             .search-btn:disabled { opacity: 0.4; cursor: not-allowed; }
             .search-hint { font-family: monospace; font-size: 0.65rem; color: #30363d; margin-top: 10px; letter-spacing: 1px; }
+
+            /* ── SEARCH HISTORY ── */
+            .search-history { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+            .history-chip { background: rgba(0,210,255,0.06); border: 1px solid rgba(0,210,255,0.2); border-radius: 5px; padding: 5px 12px; font-family: 'Space Grotesk'; font-size: 0.75rem; font-weight: 700; color: #8b949e; cursor: pointer; transition: 0.2s; letter-spacing: 1px; }
+            .history-chip:hover { background: rgba(0,210,255,0.12); border-color: var(--cyan); color: var(--cyan); }
+            .history-label { font-family: monospace; font-size: 0.6rem; color: #30363d; letter-spacing: 2px; margin-top: 14px; margin-bottom: 4px; display: block; }
+
             .search-result { margin-top: 30px; display: none; }
             .search-result.visible { display: block; }
             .result-card { background: rgba(0,0,0,0.3); border: 1px solid var(--cyan); border-radius: 16px; padding: 35px; position: relative; animation: fadeSlideIn 0.4s ease; }
@@ -460,17 +472,12 @@ function renderPage(content, rawStocks, updatedAt, losers, pulse) {
                         <span class="pulse-label">// Market Pulse</span>
                         <div class="pulse-gauge">
                             <svg viewBox="0 0 180 100" xmlns="http://www.w3.org/2000/svg">
-                                <!-- Background arc -->
                                 <path d="M 20 90 A 70 70 0 0 1 160 90" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="12" stroke-linecap="round"/>
-                                <!-- Colored arc segments -->
                                 <path d="M 20 90 A 70 70 0 0 1 55 27" fill="none" stroke="#ff007f" stroke-width="12" stroke-linecap="round" opacity="0.4"/>
                                 <path d="M 55 27 A 70 70 0 0 1 90 20" fill="none" stroke="#f97316" stroke-width="12" stroke-linecap="round" opacity="0.4"/>
                                 <path d="M 90 20 A 70 70 0 0 1 125 27" fill="none" stroke="#f59e0b" stroke-width="12" stroke-linecap="round" opacity="0.4"/>
                                 <path d="M 125 27 A 70 70 0 0 1 160 90" fill="none" stroke="#00ff9d" stroke-width="12" stroke-linecap="round" opacity="0.4"/>
-                                <!-- Needle -->
-                                <line x1="90" y1="90" x2="90" y2="28"
-                                    stroke="${pulseColor}" stroke-width="2.5" stroke-linecap="round"
-                                    transform="rotate(${rotation}, 90, 90)"/>
+                                <line x1="90" y1="90" x2="90" y2="28" stroke="${pulseColor}" stroke-width="2.5" stroke-linecap="round" transform="rotate(${rotation}, 90, 90)"/>
                                 <circle cx="90" cy="90" r="5" fill="${pulseColor}"/>
                             </svg>
                         </div>
@@ -490,6 +497,8 @@ function renderPage(content, rawStocks, updatedAt, losers, pulse) {
                         <button class="search-btn" id="searchBtn" onclick="searchTicker()">Run Analysis</button>
                     </div>
                     <div class="search-hint">// PRESS / TO FOCUS SEARCH</div>
+                    <span class="history-label" id="historyLabel" style="display:none;">// RECENT</span>
+                    <div class="search-history" id="searchHistory"></div>
                     <div class="scanning" id="scanningIndicator">
                         <div class="scan-dot"></div><div class="scan-dot"></div><div class="scan-dot"></div>
                         <span>SCANNING MARKETS...</span>
@@ -535,6 +544,7 @@ function renderPage(content, rawStocks, updatedAt, losers, pulse) {
             window.addEventListener('load', () => {
                 setTimeout(() => { document.getElementById('initOverlay').classList.add('hidden'); }, 1400);
                 initParticles();
+                renderSearchHistory();
             });
 
             // ── PARTICLE ANIMATION ──
@@ -545,42 +555,27 @@ function renderPage(content, rawStocks, updatedAt, losers, pulse) {
                 function resize() { canvas.width = canvas.offsetWidth; canvas.height = canvas.offsetHeight; }
                 resize();
                 window.addEventListener('resize', resize);
-
                 const particles = Array.from({ length: 60 }, () => ({
-                    x: Math.random() * canvas.width,
-                    y: Math.random() * canvas.height,
-                    r: Math.random() * 1.5 + 0.3,
-                    dx: (Math.random() - 0.5) * 0.4,
-                    dy: (Math.random() - 0.5) * 0.4,
-                    alpha: Math.random() * 0.5 + 0.1
+                    x: Math.random() * canvas.width, y: Math.random() * canvas.height,
+                    r: Math.random() * 1.5 + 0.3, dx: (Math.random() - 0.5) * 0.4,
+                    dy: (Math.random() - 0.5) * 0.4, alpha: Math.random() * 0.5 + 0.1
                 }));
-
                 function draw() {
                     ctx.clearRect(0, 0, canvas.width, canvas.height);
                     particles.forEach(p => {
                         p.x += p.dx; p.y += p.dy;
-                        if (p.x < 0) p.x = canvas.width;
-                        if (p.x > canvas.width) p.x = 0;
-                        if (p.y < 0) p.y = canvas.height;
-                        if (p.y > canvas.height) p.y = 0;
-                        ctx.beginPath();
-                        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-                        ctx.fillStyle = \`rgba(0,210,255,\${p.alpha})\`;
-                        ctx.fill();
+                        if (p.x < 0) p.x = canvas.width; if (p.x > canvas.width) p.x = 0;
+                        if (p.y < 0) p.y = canvas.height; if (p.y > canvas.height) p.y = 0;
+                        ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+                        ctx.fillStyle = \`rgba(0,210,255,\${p.alpha})\`; ctx.fill();
                     });
-                    // Draw connecting lines
                     for (let i = 0; i < particles.length; i++) {
                         for (let j = i + 1; j < particles.length; j++) {
-                            const dx = particles[i].x - particles[j].x;
-                            const dy = particles[i].y - particles[j].y;
+                            const dx = particles[i].x - particles[j].x, dy = particles[i].y - particles[j].y;
                             const dist = Math.sqrt(dx*dx + dy*dy);
                             if (dist < 100) {
-                                ctx.beginPath();
-                                ctx.moveTo(particles[i].x, particles[i].y);
-                                ctx.lineTo(particles[j].x, particles[j].y);
-                                ctx.strokeStyle = \`rgba(0,210,255,\${0.08 * (1 - dist/100)})\`;
-                                ctx.lineWidth = 0.5;
-                                ctx.stroke();
+                                ctx.beginPath(); ctx.moveTo(particles[i].x, particles[i].y); ctx.lineTo(particles[j].x, particles[j].y);
+                                ctx.strokeStyle = \`rgba(0,210,255,\${0.08*(1-dist/100)})\`; ctx.lineWidth = 0.5; ctx.stroke();
                             }
                         }
                     }
@@ -591,7 +586,6 @@ function renderPage(content, rawStocks, updatedAt, losers, pulse) {
 
             // ── NAV ──
             function toggleNav() { document.getElementById('navLinks').classList.toggle('open'); }
-
             function showPage(pageId) {
                 document.querySelectorAll('.page').forEach(p => p.classList.remove('active-page'));
                 document.getElementById(pageId).classList.add('active-page');
@@ -603,10 +597,7 @@ function renderPage(content, rawStocks, updatedAt, losers, pulse) {
             // ── HERO SLIDER ──
             let idx = 0;
             const engine = document.getElementById('slide-engine');
-            setInterval(() => {
-                idx = (idx + 1) % 4;
-                engine.style.transform = 'translateX(-' + (idx * 100) + '%)';
-            }, 7000);
+            setInterval(() => { idx = (idx + 1) % 4; engine.style.transform = 'translateX(-' + (idx * 100) + '%)'; }, 7000);
 
             // ── HEATMAP CLICK ──
             function heatmapSearch(ticker) {
@@ -624,22 +615,42 @@ function renderPage(content, rawStocks, updatedAt, losers, pulse) {
                 }
             });
 
+            // ── SEARCH HISTORY ──
+            function getSearchHistory() { return JSON.parse(localStorage.getItem('quantara_history') || '[]'); }
+            function addToHistory(ticker) {
+                let history = getSearchHistory().filter(t => t !== ticker);
+                history.unshift(ticker);
+                history = history.slice(0, 5);
+                localStorage.setItem('quantara_history', JSON.stringify(history));
+                renderSearchHistory();
+            }
+            function renderSearchHistory() {
+                const history = getSearchHistory();
+                const container = document.getElementById('searchHistory');
+                const label = document.getElementById('historyLabel');
+                if (!container) return;
+                if (history.length === 0) { label.style.display = 'none'; container.innerHTML = ''; return; }
+                label.style.display = 'block';
+                container.innerHTML = history.map(t => \`
+                    <div class="history-chip" onclick="quickSearch('\${t}')">\${t}</div>
+                \`).join('');
+            }
+            function quickSearch(ticker) {
+                document.getElementById('tickerInput').value = ticker;
+                searchTicker();
+            }
+
             // ── SEARCH ──
             const tickerInput = document.getElementById('tickerInput');
             const searchBtn = document.getElementById('searchBtn');
             const scanningIndicator = document.getElementById('scanningIndicator');
             const searchResult = document.getElementById('searchResult');
 
-            tickerInput.addEventListener('keydown', function(e) {
-                if (e.key === 'Enter') searchTicker();
-            });
+            tickerInput.addEventListener('keydown', function(e) { if (e.key === 'Enter') searchTicker(); });
 
             async function searchTicker() {
                 const raw = tickerInput.value.trim().toUpperCase();
-                if (!raw || !/^[A-Z]{1,5}$/.test(raw)) {
-                    showSearchError('Enter a valid ticker symbol (1-5 letters).');
-                    return;
-                }
+                if (!raw || !/^[A-Z]{1,5}$/.test(raw)) { showSearchError('Enter a valid ticker symbol (1-5 letters).'); return; }
                 searchBtn.disabled = true;
                 scanningIndicator.classList.add('active');
                 searchResult.classList.remove('visible');
@@ -647,13 +658,13 @@ function renderPage(content, rawStocks, updatedAt, losers, pulse) {
 
                 try {
                     const response = await fetch('/search', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ ticker: raw })
                     });
                     const data = await response.json();
                     if (data.error) { showSearchError(data.error); return; }
 
+                    addToHistory(data.ticker);
                     const changeClass = data.isPositive ? '' : 'negative';
                     const isSaved = getWatchlist().includes(data.ticker);
 
@@ -708,7 +719,6 @@ function renderPage(content, rawStocks, updatedAt, losers, pulse) {
             // ── WATCHLIST ──
             function getWatchlist() { return JSON.parse(localStorage.getItem('quantara_watchlist') || '[]'); }
             function saveWatchlist(list) { localStorage.setItem('quantara_watchlist', JSON.stringify(list)); }
-
             function toggleWatchlist(ticker) {
                 let list = getWatchlist();
                 const btn = document.getElementById('wlBtn_' + ticker);
@@ -721,12 +731,7 @@ function renderPage(content, rawStocks, updatedAt, losers, pulse) {
                 }
                 saveWatchlist(list);
             }
-
-            function removeFromWatchlist(ticker) {
-                saveWatchlist(getWatchlist().filter(t => t !== ticker));
-                renderWatchlist();
-            }
-
+            function removeFromWatchlist(ticker) { saveWatchlist(getWatchlist().filter(t => t !== ticker)); renderWatchlist(); }
             function renderWatchlist() {
                 const list = getWatchlist();
                 const chips = document.getElementById('watchlistChips');
@@ -740,7 +745,6 @@ function renderPage(content, rawStocks, updatedAt, losers, pulse) {
                     </div>
                 \`).join('');
             }
-
             function watchlistAnalyze(ticker) {
                 showPage('terminal');
                 document.getElementById('tickerInput').value = ticker;
