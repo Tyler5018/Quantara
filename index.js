@@ -90,8 +90,8 @@ app.get('/', async (req, res) => {
         const fullResponse = chatCompletion.choices[0]?.message?.content || "";
 
         // Split cards HTML from pulse JSON
-        const pulseMatch = fullResponse.match(/PULSE_JSON:(\{.*\})/);
-        const aiHtml = fullResponse.replace(/PULSE_JSON:.*/, '').trim();
+        const pulseMatch = fullResponse.match(/PULSE_JSON:\s*(\{[\s\S]*?\})/);
+        const aiHtml = fullResponse.replace(/PULSE_JSON:[\s\S]*/, '').trim();
         let pulse = { score: 50, label: "NEUTRAL", summary: "Market data unavailable." };
         if (pulseMatch) {
             try { pulse = JSON.parse(pulseMatch[1]); } catch {}
@@ -280,6 +280,7 @@ function renderPage(content, rawStocks, updatedAt, losers, pulse) {
             /* ── CONTAINER ── */
             .container { max-width: 1200px; margin: 50px auto; padding: 0 20px; }
             .bento-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(300px,1fr)); gap: 25px; }
+            .bento-grid > :not(.bento-item) { display: none; }
             .bento-item { background: var(--glass); border: 1px solid var(--border); border-radius: 24px; padding: 40px; backdrop-filter: blur(20px); transition: 0.4s; position: relative; }
             .bento-item:hover { border-color: var(--cyan); transform: translateY(-8px); box-shadow: 0 20px 40px rgba(0,0,0,0.4); }
 
