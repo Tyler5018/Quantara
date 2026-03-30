@@ -86,17 +86,19 @@ app.get('/', async (req, res) => {
         const aiHtml = chatCompletion.choices[0]?.message?.content || "";
 
         // Call 2: Generate Market Pulse as a separate clean call
+        const losersSummary = filteredLosers.slice(0, 5).map(s => `${s.ticker} (${s.change_percentage})`).join(", ");
         let pulse = { score: 50, label: "NEUTRAL", summary: "Market sentiment data unavailable." };
         try {
             const pulseCompletion = await groq.chat.completions.create({
                 messages: [
                     {
                         role: "system",
-                        content: `You are a market sentiment analyzer. Respond ONLY with a JSON object, no markdown, no extra text:
+                        content: `You are a market sentiment analyzer. Based on both the top gainers and top losers provided, assess the OVERALL market sentiment. Respond ONLY with a JSON object, no markdown, no extra text:
                         {"score":72,"label":"GREED","summary":"One sentence market summary."}
-                        Score must be 0-100. Label must be exactly one of: EXTREME FEAR, FEAR, NEUTRAL, GREED, EXTREME GREED.`
+                        Score must be 0-100. Label must be exactly one of: EXTREME FEAR, FEAR, NEUTRAL, GREED, EXTREME GREED.
+                        Consider both sides: heavy losses should push the score down, heavy gains should push it up.`
                     },
-                    { role: "user", content: `Stock market data: ${stockSummary}. Analyze overall market sentiment.` }
+                    { role: "user", content: `Top gainers: ${stockSummary}. Top losers: ${losersSummary}. Analyze overall market sentiment.` }
                 ],
                 model: MODEL_NAME,
             });
